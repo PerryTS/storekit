@@ -1,0 +1,9 @@
+[package]
+name = "perry-storekit"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "StoreKit 2 bindings for Perry native apps"
+
+[lib]
+crate-type = ["staticlib"]

@@ -1,0 +1,41 @@
+{
+  "name": "perry-storekit",
+  "version": "0.1.0",
+  "description": "StoreKit 2 in-app purchase bindings for Perry apps (iOS/macOS)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nichochar/perry-storekit"
+  },
+  "keywords": ["perry", "storekit", "in-app-purchase", "ios", "macos"],
+  "main": "src/index.ts",
+  "perry": {
+    "nativeLibrary": {
+      "functions": [
+        { "name": "sb_storekit_load_products", "params": ["i64"], "returns": "f64" },
+        { "name": "sb_storekit_purchase", "params": ["i64"], "returns": "f64" },
+        { "name": "sb_storekit_restore", "params": [], "returns": "f64" },
+        { "name": "sb_storekit_has_subscription", "params": [], "returns": "f64" },
+        { "name": "sb_storekit_get_jws", "params": [], "returns": "f64" },
+        { "name": "sb_storekit_start_listener", "params": [], "returns": "f64" }
+      ],
+      "targets": {
+        "ios": {
+          "crate": "crate-ios",
+          "lib": "libperry_storekit.a",
+          "frameworks": ["StoreKit", "Foundation"]
+        },
+        "android": {
+          "crate": "crate-stub",
+          "lib": "libperry_storekit.a",
+          "frameworks": []
+        },
+        "macos": {
+          "crate": "crate-ios",
+          "lib": "libperry_storekit.a",
+          "frameworks": ["StoreKit", "Foundation"]
+        }
+      }
+    }
+  }
+}
