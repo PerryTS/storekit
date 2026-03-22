@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nichochar/perry-storekit"
+    "url": "https://github.com/perryts/storekit"
   },
   "keywords": ["perry", "storekit", "in-app-purchase", "ios", "macos"],
   "main": "src/index.ts",
