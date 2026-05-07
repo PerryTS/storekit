@@ -1,10 +1,10 @@
 [package]
 name = "perry-storekit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "StoreKit 2 in-app purchase bindings for Perry apps (iOS / macOS). Closes PerryTS/perry#537."
-repository = "https://github.com/perryts/storekit"
+repository = "https://github.com/PerryTS/storekit"
 
 [lib]
 crate-type = ["staticlib", "rlib"]

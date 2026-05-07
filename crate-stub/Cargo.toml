@@ -1,10 +1,10 @@
 [package]
 name = "perry-storekit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Non-Apple stub for perry-storekit — every js_storekit_* call resolves with a 'not available' JSON payload."
-repository = "https://github.com/perryts/storekit"
+repository = "https://github.com/PerryTS/storekit"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
