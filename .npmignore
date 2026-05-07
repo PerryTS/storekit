@@ -1,0 +1,11 @@
+# Build artifacts — perry rebuilds the static lib from source on the
+# user's machine using the bundled crate-ios/Cargo.toml / crate-stub.
+target/
+**/target/
+Cargo.lock
+**/Cargo.lock
+
+# Editor / OS junk.
+.DS_Store
+*.swp
+node_modules/
