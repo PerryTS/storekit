@@ -3,6 +3,11 @@ name = "perry-storekit"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Non-Apple stub for perry-storekit — every js_storekit_* call resolves with a 'not available' JSON payload."
+repository = "https://github.com/perryts/storekit"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+perry-ffi = { git = "https://github.com/PerryTS/perry", branch = "main" }

@@ -1,10 +1,16 @@
 import Foundation
 import StoreKit
 
-// Type alias for C callback function pointer
+// C-compatible callback the Rust side hands us. The first argument is the
+// `*mut Promise` Rust gave us as opaque context; the second is a NUL-
+// terminated UTF-8 JSON payload with the call result. Rust takes ownership
+// of the bytes by `String(cString:)`-equivalent (CStr → str) before it
+// resolves the promise, so the lifetime of our CString only needs to
+// outlast the single synchronous `callback(...)` call.
 typealias StoreKitCallback = @convention(c) (UnsafeMutableRawPointer, UnsafePointer<CChar>) -> Void
 
-// Global actor for managing StoreKit state
+// MARK: - State
+
 actor StoreKitState {
     static let shared = StoreKitState()
 
@@ -31,6 +37,44 @@ actor StoreKitState {
     }
 }
 
+// MARK: - JSON helpers
+
+private let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private func sendJson(_ obj: Any, _ callback: @escaping StoreKitCallback, _ context: UnsafeMutableRawPointer) {
+    do {
+        let data = try JSONSerialization.data(withJSONObject: obj)
+        let str = String(data: data, encoding: .utf8) ?? "{}"
+        str.withCString { callback(context, $0) }
+    } catch {
+        let fallback = "{\"error\":\"json encode failed\"}"
+        fallback.withCString { callback(context, $0) }
+    }
+}
+
+private func sendError(_ message: String, success: Bool? = nil, _ callback: @escaping StoreKitCallback, _ context: UnsafeMutableRawPointer) {
+    var obj: [String: Any] = ["error": message]
+    if let success = success { obj["success"] = success }
+    sendJson(obj, callback, context)
+}
+
+// MARK: - Product type stringification
+
+@available(iOS 15.0, macOS 12.0, *)
+private func describeType(_ product: Product) -> String {
+    switch product.type {
+    case .consumable: return "consumable"
+    case .nonConsumable: return "nonConsumable"
+    case .nonRenewable: return "nonRenewable"
+    case .autoRenewable: return "autoRenewable"
+    default: return "unknown"
+    }
+}
+
 // MARK: - Load Products
 
 @_cdecl("swift_storekit_load_products")
@@ -48,22 +92,33 @@ func swiftStoreKitLoadProducts(
             await StoreKitState.shared.setProducts(products)
 
             let result = products.map { product -> [String: Any] in
-                [
+                var dict: [String: Any] = [
                     "id": product.id,
                     "displayName": product.displayName,
                     "description": product.description,
                     "displayPrice": product.displayPrice,
                     "price": NSDecimalNumber(decimal: product.price).doubleValue,
-                    "isAnnual": product.id.contains("ANNUAL")
+                    "priceCurrencyCode": product.priceFormatStyle.currencyCode,
+                    "type": describeType(product),
                 ]
+                if let sub = product.subscription {
+                    let unit: String
+                    switch sub.subscriptionPeriod.unit {
+                    case .day: unit = "day"
+                    case .week: unit = "week"
+                    case .month: unit = "month"
+                    case .year: unit = "year"
+                    @unknown default: unit = "unknown"
+                    }
+                    dict["subscriptionPeriodUnit"] = unit
+                    dict["subscriptionPeriodValue"] = sub.subscriptionPeriod.value
+                }
+                return dict
             }
 
-            let jsonData = try JSONSerialization.data(withJSONObject: result)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
-            jsonString.withCString { callback(context, $0) }
+            sendJson(result, callback, context)
         } catch {
-            let errorJson = "{\"error\":\"\(error.localizedDescription)\"}"
-            errorJson.withCString { callback(context, $0) }
+            sendError(error.localizedDescription, callback, context)
         }
     }
 }
@@ -80,8 +135,7 @@ func swiftStoreKitPurchase(
 
     Task {
         guard let product = await StoreKitState.shared.getProduct(id: id) else {
-            let err = "{\"error\":\"Product not found\",\"success\":false}"
-            err.withCString { callback(context, $0) }
+            sendError("Product not found — call loadProducts first", success: false, callback, context)
             return
         }
 
@@ -93,26 +147,27 @@ func swiftStoreKitPurchase(
                 switch verification {
                 case .verified(let transaction):
                     await transaction.finish()
-                    let jws = verification.jwsRepresentation
-                    let json = "{\"success\":true,\"jws\":\"\(jws)\",\"productId\":\"\(transaction.productID)\",\"cancelled\":false}"
-                    json.withCString { callback(context, $0) }
+                    let payload: [String: Any] = [
+                        "success": true,
+                        "jws": verification.jwsRepresentation,
+                        "productId": transaction.productID,
+                        "transactionId": String(transaction.id),
+                        "purchaseDate": isoFormatter.string(from: transaction.purchaseDate),
+                        "cancelled": false,
+                    ]
+                    sendJson(payload, callback, context)
                 case .unverified(_, let error):
-                    let err = "{\"error\":\"Verification failed: \(error.localizedDescription)\",\"success\":false}"
-                    err.withCString { callback(context, $0) }
+                    sendError("Verification failed: \(error.localizedDescription)", success: false, callback, context)
                 }
             case .userCancelled:
-                let json = "{\"success\":false,\"cancelled\":true}"
-                json.withCString { callback(context, $0) }
+                sendJson(["success": false, "cancelled": true], callback, context)
             case .pending:
-                let json = "{\"success\":false,\"pending\":true}"
-                json.withCString { callback(context, $0) }
+                sendJson(["success": false, "pending": true], callback, context)
             @unknown default:
-                let err = "{\"error\":\"Unknown result\",\"success\":false}"
-                err.withCString { callback(context, $0) }
+                sendError("Unknown purchase result", success: false, callback, context)
             }
         } catch {
-            let err = "{\"error\":\"\(error.localizedDescription)\",\"success\":false}"
-            err.withCString { callback(context, $0) }
+            sendError(error.localizedDescription, success: false, callback, context)
         }
     }
 }
@@ -127,16 +182,14 @@ func swiftStoreKitRestore(
     Task {
         do {
             try await AppStore.sync()
-            let json = "{\"success\":true}"
-            json.withCString { callback(context, $0) }
+            sendJson(["success": true], callback, context)
         } catch {
-            let err = "{\"error\":\"\(error.localizedDescription)\",\"success\":false}"
-            err.withCString { callback(context, $0) }
+            sendError(error.localizedDescription, success: false, callback, context)
         }
     }
 }
 
-// MARK: - Check Active Subscription
+// MARK: - Active Subscription Check
 
 @_cdecl("swift_storekit_has_subscription")
 func swiftStoreKitHasSubscription(
@@ -153,12 +206,11 @@ func swiftStoreKitHasSubscription(
                 }
             }
         }
-        let json = "{\"hasSubscription\":\(hasActive)}"
-        json.withCString { callback(context, $0) }
+        sendJson(["hasSubscription": hasActive], callback, context)
     }
 }
 
-// MARK: - Get Latest JWS
+// MARK: - Latest JWS
 
 @_cdecl("swift_storekit_get_jws")
 func swiftStoreKitGetJws(
@@ -174,16 +226,15 @@ func swiftStoreKitGetJws(
         }
 
         if let jws = latestJWS {
-            let json = "{\"jws\":\"\(jws)\"}"
-            json.withCString { callback(context, $0) }
+            sendJson(["jws": jws], callback, context)
         } else {
-            let json = "{\"jws\":null}"
-            json.withCString { callback(context, $0) }
+            // JSONSerialization needs NSNull for an explicit JSON null.
+            sendJson(["jws": NSNull()], callback, context)
         }
     }
 }
 
-// MARK: - Start Transaction Listener
+// MARK: - Transaction Updates Listener
 
 @_cdecl("swift_storekit_start_listener")
 func swiftStoreKitStartListener() {

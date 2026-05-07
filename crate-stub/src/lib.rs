@@ -1,48 +1,42 @@
-// Perry runtime FFI functions for promise handling and NaN-boxing
-extern "C" {
-    fn js_promise_new() -> *mut u8;
-    fn js_promise_resolve(promise: *mut u8, value: f64);
-    fn js_nanbox_string(ptr: i64) -> f64;
-    fn js_nanbox_pointer(ptr: i64) -> f64;
-}
+//! Non-Apple stub for `perry-storekit`. Every `js_storekit_*` entry point
+//! resolves immediately with a `"not available on this platform"` JSON
+//! payload so calling code can fall back to a Stripe-card flow (or
+//! whatever the app's non-IAP path is) without special-casing the
+//! presence of the binding.
 
-/// Helper to create a promise, resolve it immediately with an error/stub JSON string,
-/// and return the NaN-boxed promise handle.
-fn resolve_with_error(msg: &str) -> f64 {
-    unsafe {
-        let promise = js_promise_new();
-        let c_str = std::ffi::CString::new(msg).unwrap();
-        let val = js_nanbox_string(c_str.as_ptr() as i64);
-        std::mem::forget(c_str);
-        js_promise_resolve(promise, val);
-        js_nanbox_pointer(promise as i64)
-    }
+use perry_ffi::{JsPromise, Promise, StringHeader};
+
+fn resolved_with(msg: &str) -> *mut Promise {
+    let promise = JsPromise::new();
+    let raw = promise.as_raw();
+    promise.resolve_string(msg);
+    raw
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_load_products(_product_ids: i64) -> f64 {
-    resolve_with_error("{\"error\":\"StoreKit not available on this platform\"}")
+pub extern "C" fn js_storekit_load_products(_product_ids: *const StringHeader) -> *mut Promise {
+    resolved_with("{\"error\":\"StoreKit not available on this platform\"}")
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_purchase(_product_id: i64) -> f64 {
-    resolve_with_error("{\"error\":\"StoreKit not available on this platform\",\"success\":false}")
+pub extern "C" fn js_storekit_purchase(_product_id: *const StringHeader) -> *mut Promise {
+    resolved_with("{\"error\":\"StoreKit not available on this platform\",\"success\":false}")
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_restore() -> f64 {
-    resolve_with_error("{\"error\":\"StoreKit not available on this platform\",\"success\":false}")
+pub extern "C" fn js_storekit_restore() -> *mut Promise {
+    resolved_with("{\"error\":\"StoreKit not available on this platform\",\"success\":false}")
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_has_subscription() -> f64 {
-    resolve_with_error("{\"hasSubscription\":false}")
+pub extern "C" fn js_storekit_has_subscription() -> *mut Promise {
+    resolved_with("{\"hasSubscription\":false}")
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_get_jws() -> f64 {
-    resolve_with_error("{\"jws\":null}")
+pub extern "C" fn js_storekit_get_jws() -> *mut Promise {
+    resolved_with("{\"jws\":null}")
 }
 
 #[no_mangle]
-pub extern "C" fn sb_storekit_start_listener() -> f64 { 0.0 }
+pub extern "C" fn js_storekit_start_listener() {}

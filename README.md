@@ -1,151 +1,170 @@
 # perry-storekit
 
-StoreKit 2 in-app purchase bindings for Perry apps.
+StoreKit 2 in-app purchase bindings for [Perry](https://github.com/PerryTS/perry) — closes [PerryTS/perry#537](https://github.com/PerryTS/perry/issues/537).
 
 ## Platforms
 
-- **iOS 16+** and **macOS 13+** -- full StoreKit 2 support
-- **Android** -- stub implementation (all functions return error/default JSON)
+| Target          | Implementation                                                          |
+| --------------- | ----------------------------------------------------------------------- |
+| iOS 16+         | Native — Swift bridge over StoreKit 2 (`Product.products(for:)`, etc.). |
+| macOS 13+       | Native — same Swift bridge.                                             |
+| Linux / Windows | Stub — every call resolves with a `"not available"` JSON payload.       |
+| Android         | Stub. (Google Play Billing is a separate binding — see issue #537.)     |
 
 ## Installation
-
-Add as a local dependency in your Perry app:
-
-```json
-{
-  "dependencies": {
-    "perry-storekit": "file:../perry-storekit"
-  }
-}
-```
-
-Or install from npm:
 
 ```bash
 npm install perry-storekit
 ```
 
-## Usage
+The package targets perry-ffi ABI v0.5 (`perry.nativeLibrary.abiVersion: "0.5"` in `package.json`). Perry validates compatibility at build time.
+
+## Quick start
 
 ```typescript
 import {
-  sb_storekit_load_products,
-  sb_storekit_purchase,
-  sb_storekit_restore,
-  sb_storekit_has_subscription,
-  sb_storekit_get_jws,
-  sb_storekit_start_listener,
+  js_storekit_start_listener,
+  js_storekit_load_products,
+  js_storekit_purchase,
+  js_storekit_has_subscription,
+  js_storekit_get_jws,
+  js_storekit_restore,
 } from "perry-storekit";
 
-// Start the transaction listener early (handles background updates)
-sb_storekit_start_listener();
+// Boot the Transaction.updates listener once at launch — handles
+// Ask-to-Buy approvals, family-shared entitlements, auto-renew, etc.
+js_storekit_start_listener();
 
-// Load products by comma-separated App Store Connect product IDs
-const productsJson: string = await sb_storekit_load_products(
-  "com.example.pro_monthly,com.example.pro_annual"
+// Load products you have configured in App Store Connect.
+const productsJson = await js_storekit_load_products(
+  "com.example.pro_monthly,com.example.pro_annual",
 );
 const products = JSON.parse(productsJson);
 
-// Purchase a product
-const resultJson: string = await sb_storekit_purchase("com.example.pro_monthly");
-const result = JSON.parse(resultJson);
-if (result.success) {
-  // result.jws contains the signed transaction for server validation
-  // result.productId contains the purchased product ID
+// Drive the purchase sheet. The product must have been loaded first —
+// StoreKit 2 needs the in-memory `Product` value to call `purchase()`.
+const purchaseJson = await js_storekit_purchase("com.example.pro_monthly");
+const purchase = JSON.parse(purchaseJson);
+if (purchase.success) {
+  // purchase.jws → server-side receipt validation
+  // purchase.transactionId, purchase.purchaseDate → audit log
 }
 
-// Check if user has an active subscription
-const subJson: string = await sb_storekit_has_subscription();
-const sub = JSON.parse(subJson);
-// sub.hasSubscription is true or false
-
-// Get the JWS for the latest transaction (for server-side validation)
-const jwsJson: string = await sb_storekit_get_jws();
-const jws = JSON.parse(jwsJson);
-// jws.jws is a string or null
-
-// Restore purchases (calls AppStore.sync())
-const restoreJson: string = await sb_storekit_restore();
-const restore = JSON.parse(restoreJson);
-// restore.success is true or false
+// Check entitlements at any time.
+const subJson = await js_storekit_has_subscription();
+const { hasSubscription } = JSON.parse(subJson);
 ```
 
-## API Reference
+## Typed wrapper (recommended)
 
-All functions return Perry NaN-boxed promise handles. When awaited in Perry TypeScript, they resolve to JSON strings.
+The native FFI returns JSON strings so the cross-language contract stays simple. In your app, wrap the calls with the types this package re-exports:
 
-### `sb_storekit_load_products(productIds: string): Promise<string>`
+```typescript
+import {
+  js_storekit_load_products,
+  js_storekit_purchase,
+  js_storekit_has_subscription,
+  js_storekit_get_jws,
+  js_storekit_restore,
+  type Product,
+  type PurchaseResult,
+  type HasSubscriptionResult,
+  type JwsResult,
+  type RestoreResult,
+} from "perry-storekit";
 
-Load products from the App Store by comma-separated product IDs. Products are cached in memory for subsequent purchase calls.
-
-**Returns:** JSON array of product objects:
-```json
-[
-  {
-    "id": "com.example.pro_monthly",
-    "displayName": "Pro Monthly",
-    "description": "Unlock all features",
-    "displayPrice": "$9.99",
-    "price": 9.99,
-    "isAnnual": false
+export async function loadProducts(ids: string[]): Promise<Product[]> {
+  const json = await js_storekit_load_products(ids.join(","));
+  const parsed = JSON.parse(json);
+  if (parsed && typeof parsed === "object" && "error" in parsed) {
+    throw new Error(parsed.error as string);
   }
-]
+  return parsed as Product[];
+}
+
+export async function purchase(productId: string): Promise<PurchaseResult> {
+  const json = await js_storekit_purchase(productId);
+  return JSON.parse(json) as PurchaseResult;
+}
+
+export async function hasSubscription(): Promise<boolean> {
+  const json = await js_storekit_has_subscription();
+  return (JSON.parse(json) as HasSubscriptionResult).hasSubscription;
+}
+
+export async function getJWS(): Promise<string | null> {
+  const json = await js_storekit_get_jws();
+  return (JSON.parse(json) as JwsResult).jws;
+}
+
+export async function restorePurchases(): Promise<RestoreResult> {
+  const json = await js_storekit_restore();
+  return JSON.parse(json) as RestoreResult;
+}
 ```
 
-On error: `{"error": "..."}`
+The `Product` and `PurchaseResult` shapes match the sketch in [issue #537](https://github.com/PerryTS/perry/issues/537), with one practical addition: `PurchaseResult.jws` carries the App Store-issued JWS, which is what Apple's [App Store Server API](https://developer.apple.com/documentation/appstoreserverapi) expects for server-side validation. (The legacy base64 `receipt` is no longer the recommended StoreKit 2 path.)
 
-### `sb_storekit_purchase(productId: string): Promise<string>`
+## API reference
 
-Purchase a product by its ID. The product must have been loaded first via `sb_storekit_load_products`.
+### `js_storekit_start_listener(): void`
 
-**Returns:**
+Start `Transaction.updates` in a detached `Task`. Verified transactions are automatically `finish()`-ed. Call exactly once at app launch — calling again cancels the previous listener.
+
+### `js_storekit_load_products(commaSeparatedIds: string): Promise<string>`
+
+Resolves with a JSON array of [`Product`](./src/index.ts) objects. On failure: `{"error": "..."}`.
+
+Loaded products are cached in a Swift `actor` so `js_storekit_purchase` can look them up by ID.
+
+### `js_storekit_purchase(productId: string): Promise<string>`
+
+Resolves with a JSON [`PurchaseResult`](./src/index.ts). Possible shapes:
+
 ```json
-{"success": true, "jws": "...", "productId": "...", "cancelled": false}
+{ "success": true,  "jws": "eyJ…", "productId": "…", "transactionId": "…", "purchaseDate": "2026-05-07T10:23:11.123Z", "cancelled": false }
+{ "success": false, "cancelled": true }
+{ "success": false, "pending": true }
+{ "success": false, "error": "…" }
 ```
 
-Other outcomes:
-- User cancelled: `{"success": false, "cancelled": true}`
-- Pending (e.g. Ask to Buy): `{"success": false, "pending": true}`
-- Error: `{"error": "...", "success": false}`
+### `js_storekit_has_subscription(): Promise<string>`
 
-### `sb_storekit_restore(): Promise<string>`
+Resolves with `{"hasSubscription": boolean}`. True iff at least one of `Transaction.currentEntitlements` is verified and has no `revocationDate`.
 
-Restore purchases by calling `AppStore.sync()`.
+### `js_storekit_get_jws(): Promise<string>`
 
-**Returns:** `{"success": true}` or `{"error": "...", "success": false}`
+Resolves with `{"jws": "…"}` (most recent verified entitlement) or `{"jws": null}` (no active entitlement). Hand the JWS to your server, validate against Apple, then trust it.
 
-### `sb_storekit_has_subscription(): Promise<string>`
+### `js_storekit_restore(): Promise<string>`
 
-Check whether the user has an active (non-revoked) subscription.
+Calls `AppStore.sync()`. Resolves with `{"success": true}` or `{"error": "…", "success": false}`. Apple recommends only invoking this from a user-tapped "Restore Purchases" button.
 
-**Returns:** `{"hasSubscription": true}` or `{"hasSubscription": false}`
+## How it's wired
 
-### `sb_storekit_get_jws(): Promise<string>`
+```
+TypeScript                Rust (perry-ffi 0.5)         Swift (StoreKit 2)
+-------------------       ----------------------       ----------------------
+js_storekit_purchase  →   #[no_mangle] extern "C"  →   @_cdecl bridge fn
+                          fn js_storekit_purchase      runs Task { … }
+                          returns *mut Promise         calls back with JSON
+                          ←─── promise.resolve_string(json) ←──────────
+```
 
-Get the JWS (JSON Web Signature) for the latest transaction entitlement. Useful for server-side receipt validation.
+* `crate-ios/` — Apple-platform crate. Depends on `perry-ffi = "0.5"` (tracked at `git+https://github.com/PerryTS/perry`). Its `build.rs` compiles `swift/storekit_bridge.swift` to a static lib and links it; `package.json` lists `StoreKit` and `Foundation` so perry's link step adds `-framework`.
+* `crate-stub/` — non-Apple crate. Same exported `js_storekit_*` symbol set, but every call resolves immediately with a `"not available on this platform"` payload so calling code can fall back to a Stripe/web flow without `#ifdef`-style platform checks.
+* `package.json :: perry.nativeLibrary` — declares `abiVersion: "0.5"`, the FFI symbol list, and per-target `crate` / `lib` / `frameworks`.
 
-**Returns:** `{"jws": "eyJ..."}` or `{"jws": null}`
+## Server-side validation
 
-### `sb_storekit_start_listener(): void`
+This binding does not validate JWS receipts itself — that's plain HTTPS against [Apple's App Store Server API](https://developer.apple.com/documentation/appstoreserverapi/verify_a_transaction). A typical flow:
 
-Start a background listener for StoreKit transaction updates. Automatically finishes verified transactions. Call this once at app startup.
+1. Client: `js_storekit_purchase("…")` → JWS.
+2. Client → your server: `POST /verify-storekit { jws }`.
+3. Server: validate signature, check `transactionId`, mark entitlement.
+4. Server → client: confirmation.
 
-**Returns:** `0.0` (synchronous, no promise)
-
-## How It Works
-
-This package uses Perry's native library system to bridge TypeScript to native platform code:
-
-1. **TypeScript** declares the function signatures (`src/index.ts`)
-2. **Rust** (`crate-ios/src/lib.rs`) implements the FFI boundary, creating Perry promises and forwarding calls to Swift
-3. **Swift** (`crate-ios/swift/storekit_bridge.swift`) calls StoreKit 2 APIs and returns results via C callbacks
-4. The Rust build script (`crate-ios/build.rs`) compiles the Swift code into a static library and links it
-
-On Android, the stub crate (`crate-stub/`) provides the same function signatures but returns error JSON immediately.
-
-## Perry Async Model
-
-Perry uses NaN-boxing for its value representation. All async StoreKit operations return a NaN-boxed pointer to a Perry promise. The Rust layer creates the promise via `js_promise_new()`, passes a callback to Swift, and Swift resolves the promise with a JSON string when the operation completes. In TypeScript, you simply `await` the function call.
+Periodically poll `js_storekit_has_subscription()` (or react to `Transaction.updates`) to keep the local cache fresh.
 
 ## License
 

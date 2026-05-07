@@ -3,7 +3,14 @@ name = "perry-storekit"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "StoreKit 2 bindings for Perry native apps"
+description = "StoreKit 2 in-app purchase bindings for Perry apps (iOS / macOS). Closes PerryTS/perry#537."
+repository = "https://github.com/perryts/storekit"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Tracks the perry-ffi v0.5 ABI surface published from the
+# `PerryTS/perry` workspace. Pinned to a git rev rather than a
+# crates.io release until perry-ffi is published on crates.io.
+perry-ffi = { git = "https://github.com/PerryTS/perry", branch = "main" }
