@@ -1,4 +1,4 @@
-# perry-storekit
+# @perryts/storekit
 
 StoreKit 2 in-app purchase bindings for [Perry](https://github.com/PerryTS/perry) — closes [PerryTS/perry#537](https://github.com/PerryTS/perry/issues/537).
 
@@ -14,7 +14,7 @@ StoreKit 2 in-app purchase bindings for [Perry](https://github.com/PerryTS/perry
 ## Installation
 
 ```bash
-npm install perry-storekit
+npm install @perryts/storekit
 ```
 
 The package targets perry-ffi ABI v0.5 (`perry.nativeLibrary.abiVersion: "0.5"` in `package.json`). Perry validates compatibility at build time.
@@ -29,7 +29,7 @@ import {
   js_storekit_has_subscription,
   js_storekit_get_jws,
   js_storekit_restore,
-} from "perry-storekit";
+} from "@perryts/storekit";
 
 // Boot the Transaction.updates listener once at launch — handles
 // Ask-to-Buy approvals, family-shared entitlements, auto-renew, etc.
@@ -71,7 +71,7 @@ import {
   type HasSubscriptionResult,
   type JwsResult,
   type RestoreResult,
-} from "perry-storekit";
+} from "@perryts/storekit";
 
 export async function loadProducts(ids: string[]): Promise<Product[]> {
   const json = await js_storekit_load_products(ids.join(","));

@@ -1,5 +1,5 @@
 {
-  "name": "perry-storekit",
+  "name": "@perryts/storekit",
   "version": "0.1.0",
   "description": "StoreKit 2 in-app purchase bindings (iOS / macOS) for the Perry TypeScript-to-native compiler. Closes PerryTS/perry#537.",
   "license": "MIT",
