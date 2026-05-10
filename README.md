@@ -1,6 +1,6 @@
 # @perryts/storekit
 
-StoreKit 2 in-app purchase bindings for [Perry](https://github.com/PerryTS/perry) — closes [PerryTS/perry#537](https://github.com/PerryTS/perry/issues/537).
+StoreKit 2 in-app purchase bindings (iOS / macOS) for [Perry](https://github.com/PerryTS/perry). For Android, use [`@perryts/play-billing`](https://github.com/PerryTS/play-billing).
 
 ## Platforms
 
@@ -8,8 +8,8 @@ StoreKit 2 in-app purchase bindings for [Perry](https://github.com/PerryTS/perry
 | --------------- | ----------------------------------------------------------------------- |
 | iOS 16+         | Native — Swift bridge over StoreKit 2 (`Product.products(for:)`, etc.). |
 | macOS 13+       | Native — same Swift bridge.                                             |
+| Android         | Stub. Use [`@perryts/play-billing`](https://github.com/PerryTS/play-billing) for Google Play Billing. |
 | Linux / Windows | Stub — every call resolves with a `"not available"` JSON payload.       |
-| Android         | Stub. (Google Play Billing is a separate binding — see issue #537.)     |
 
 ## Installation
 
