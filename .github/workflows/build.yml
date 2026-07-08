@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # crate-ios must build on non-Apple hosts (stub fallback, no swiftc),
+  # and crate-stub is what perry links on linux/android/windows targets.
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [crate-ios, crate-stub]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build ${{ matrix.crate }}
+        run: cargo build --release --manifest-path ${{ matrix.crate }}/Cargo.toml
+      - name: Check exported symbols
+        run: |
+          nm ${{ matrix.crate }}/target/release/libperry_storekit.a | grep -q "T js_storekit_purchase"
+          ! nm ${{ matrix.crate }}/target/release/libperry_storekit.a | grep -q "swift_storekit"
+
+  # The real Swift bridge still has to compile and get bundled on Apple
+  # hosts, and this job produces the prebuilt bridge archives that the
+  # ios-from-linux job (and the publish workflow) consume.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build crate-ios (Swift bridge from source)
+        run: cargo build --release --manifest-path crate-ios/Cargo.toml
+      - name: Check Swift bridge is bundled
+        run: nm crate-ios/target/release/libperry_storekit.a | grep -q "T _swift_storekit_purchase"
+      - name: Build prebuilt bridges for all Apple targets
+        run: ./scripts/build-bridges.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-bridges
+          path: crate-ios/prebuilt/
+          if-no-files-found: error
+
+  # The headline guarantee: a Linux host produces the real iOS StoreKit
+  # library (Rust cross-compile + prebuilt Swift bridge, no Xcode).
+  ios-from-linux:
+    needs: macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+          components: llvm-tools
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-bridges
+          path: crate-ios/prebuilt/
+      - name: Build crate-ios for iOS device
+        run: cargo build --release --manifest-path crate-ios/Cargo.toml --target aarch64-apple-ios
+      - name: Check FFI surface and Swift bridge are bundled
+        run: |
+          LLVM_NM="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-nm"
+          AR=crate-ios/target/aarch64-apple-ios/release/libperry_storekit.a
+          for sym in js_storekit_load_products js_storekit_purchase js_storekit_restore \
+                     js_storekit_has_subscription js_storekit_get_jws js_storekit_start_listener \
+                     swift_storekit_purchase swift_storekit_start_listener; do
+            "$LLVM_NM" --defined-only "$AR" 2>/dev/null | grep -q " T _$sym" \
+              || { echo "::error::missing defined symbol _$sym"; exit 1; }
+          done

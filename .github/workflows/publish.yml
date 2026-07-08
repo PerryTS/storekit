@@ -6,7 +6,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The Swift StoreKit bridge can only be compiled on macOS (swiftc + Apple
+  # SDKs). Prebuilt archives ship in the npm package so non-Mac hosts can
+  # produce iOS/macOS libraries without a Swift toolchain.
+  bridges:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build Swift bridges for all Apple targets
+        run: ./scripts/build-bridges.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-bridges
+          path: crate-ios/prebuilt/
+          if-no-files-found: error
+
   publish:
+    needs: bridges
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,6 +37,11 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-bridges
+          path: crate-ios/prebuilt/
+
       - name: Verify tag matches package.json version
         if: github.event_name == 'release'
         run: |
@@ -28,5 +51,11 @@ jobs:
             echo "::error::Release tag ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
             exit 1
           fi
+
+      - name: Verify prebuilt bridges are staged
+        run: |
+          for triple in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin; do
+            test -s "crate-ios/prebuilt/$triple/libstorekit_bridge.a" || { echo "::error::missing bridge for $triple"; exit 1; }
+          done
 
       - run: npm publish --provenance --access public

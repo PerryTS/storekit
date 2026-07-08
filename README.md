@@ -11,6 +11,33 @@ StoreKit 2 in-app purchase bindings (iOS / macOS) for [Perry](https://github.com
 | Android         | Stub. Use [`@perryts/play-billing`](https://github.com/PerryTS/play-billing) for Google Play Billing. |
 | Linux / Windows | Stub — every call resolves with a `"not available"` JSON payload.       |
 
+### Build requirements
+
+No Swift toolchain, Xcode, or macOS host is required to build this package —
+for **any** target, including iOS:
+
+* **Linux / Windows / Android targets** — pure Rust. `crate-stub` (and
+  `crate-ios`, which compiles the same stub fallback for non-Apple targets)
+  builds with nothing but a Rust toolchain.
+* **iOS / macOS targets on a Mac** — `crate-ios/build.rs` detects `swiftc`
+  via `xcrun` and compiles `swift/storekit_bridge.swift` from source, as
+  before.
+* **iOS / macOS targets on a non-Mac host** — the npm package ships prebuilt
+  Swift bridge archives under `crate-ios/prebuilt/<rust-triple>/` (built on
+  macOS CI at publish time from the same Swift source). When `build.rs`
+  finds no `swiftc`, it links the prebuilt archive for the target triple
+  instead. The Rust side is pure Rust (`perry-ffi` → `dashmap`, `once_cell`),
+  so `cargo build --target aarch64-apple-ios` needs only
+  `rustup target add aarch64-apple-ios` — no Apple SDK, no C compiler.
+  Perry's Linux builders then link the resulting archive into the app with
+  `ld64.lld` and an Apple sysroot (`PERRY_IOS_SYSROOT`).
+
+Set `PERRY_STOREKIT_BRIDGE=source` or `=prebuilt` to force either path.
+When working from a **git checkout** (which does not contain the prebuilt
+archives) on a non-Mac host, run `scripts/build-bridges.sh` once on a Mac
+and copy `crate-ios/prebuilt/` over — or consume the npm package, which
+includes them.
+
 ## Installation
 
 ```bash
@@ -151,7 +178,7 @@ js_storekit_purchase  →   #[no_mangle] extern "C"  →   @_cdecl bridge fn
                           ←─── promise.resolve_string(json) ←──────────
 ```
 
-* `crate-ios/` — Apple-platform crate. Depends on `perry-ffi = "0.5"` (tracked at `git+https://github.com/PerryTS/perry`). Its `build.rs` compiles `swift/storekit_bridge.swift` to a static lib and links it; `package.json` lists `StoreKit` and `Foundation` so perry's link step adds `-framework`.
+* `crate-ios/` — Apple-platform crate. Depends on `perry-ffi = "0.5"` (tracked at `git+https://github.com/PerryTS/perry`). When targeting iOS/macOS, its `build.rs` compiles `swift/storekit_bridge.swift` to a static lib and links it — or, on hosts without `swiftc` (Linux builders), links the prebuilt bridge archive shipped under `crate-ios/prebuilt/<rust-triple>/`; `package.json` lists `StoreKit` and `Foundation` so perry's link step adds `-framework`. For any other target, `build.rs` is a no-op and the crate compiles the same stub fallback as `crate-stub`, so it builds on machines without Swift or Xcode.
 * `crate-stub/` — non-Apple crate. Same exported `js_storekit_*` symbol set, but every call resolves immediately with a `"not available on this platform"` payload so calling code can fall back to a Stripe/web flow without `#ifdef`-style platform checks.
 * `package.json :: perry.nativeLibrary` — declares `abiVersion: "0.5"`, the FFI symbol list, and per-target `crate` / `lib` / `frameworks`.
 

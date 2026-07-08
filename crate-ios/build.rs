@@ -3,15 +3,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // Non-Apple target: lib.rs compiles the stub fallback instead of the
+    // Swift bridge, so there is nothing to build or link here. This keeps
+    // the crate buildable on hosts without Xcode/swiftc (e.g. Linux CI).
+    if target_os != "ios" && target_os != "macos" {
+        return;
+    }
+
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let swift_dir = Path::new(&manifest_dir).join("swift");
-    let swift_source = swift_dir.join("storekit_bridge.swift");
+    let swift_source = Path::new(&manifest_dir)
+        .join("swift")
+        .join("storekit_bridge.swift");
 
     println!("cargo:rerun-if-changed={}", swift_source.display());
+    println!("cargo:rerun-if-env-changed=PERRY_STOREKIT_BRIDGE");
 
     let target = env::var("TARGET").unwrap_or_default();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     // Determine the swiftc -target flag and SDK path based on the Rust target triple
     let (swift_target, sdk_name) = match target.as_str() {
@@ -65,9 +74,77 @@ fn main() {
         }
     };
 
+    // Decide whether to compile the Swift bridge from source (needs Xcode's
+    // swiftc + Apple SDK, i.e. a macOS host) or link the prebuilt archive
+    // shipped under prebuilt/<rust-triple>/ (works on any host, which is how
+    // Linux builders produce iOS/macOS libraries).
+    //
+    // PERRY_STOREKIT_BRIDGE=source|prebuilt forces one path; otherwise we
+    // autodetect by asking xcrun for a swiftc that can target the SDK.
+    let use_source = match env::var("PERRY_STOREKIT_BRIDGE").as_deref() {
+        Ok("source") => true,
+        Ok("prebuilt") => false,
+        _ => swiftc_for_sdk(&sdk_name).is_some(),
+    };
+
+    if use_source {
+        compile_bridge_from_source(&swift_source, &swift_target, &sdk_name, &target_os);
+    } else {
+        link_prebuilt_bridge(&manifest_dir, &target);
+    }
+
+    println!("cargo:rustc-link-lib=static=storekit_bridge");
+}
+
+/// Locate a swiftc able to target `sdk_name` via xcrun. Returns `None` on
+/// hosts without Xcode (or without that SDK), which routes the build to the
+/// prebuilt bridge archive.
+fn swiftc_for_sdk(sdk_name: &str) -> Option<String> {
+    let output = Command::new("xcrun")
+        .args(["--sdk", sdk_name, "--find", "swiftc"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+fn link_prebuilt_bridge(manifest_dir: &str, target: &str) {
+    let prebuilt_dir = Path::new(manifest_dir).join("prebuilt").join(target);
+    let prebuilt_lib = prebuilt_dir.join("libstorekit_bridge.a");
+
+    if !prebuilt_lib.exists() {
+        panic!(
+            "No Swift toolchain for Apple targets on this host, and no prebuilt \
+             StoreKit bridge at {}. Published @perryts/storekit packages ship the \
+             prebuilt archives; when building from a git checkout, run \
+             scripts/build-bridges.sh on a Mac (or set PERRY_STOREKIT_BRIDGE=source \
+             on a macOS host with Xcode).",
+            prebuilt_lib.display()
+        );
+    }
+
+    println!("cargo:rerun-if-changed={}", prebuilt_lib.display());
+    println!("cargo:rustc-link-search=native={}", prebuilt_dir.display());
+}
+
+fn compile_bridge_from_source(
+    swift_source: &Path,
+    swift_target: &str,
+    sdk_name: &str,
+    target_os: &str,
+) {
+    let out_dir = env::var("OUT_DIR").unwrap();
+
     // Get SDK path via xcrun
     let sdk_path_output = Command::new("xcrun")
-        .args(["--sdk", &sdk_name, "--show-sdk-path"])
+        .args(["--sdk", sdk_name, "--show-sdk-path"])
         .output()
         .expect("Failed to run xcrun to find SDK path");
     let sdk_path = String::from_utf8(sdk_path_output.stdout)
@@ -75,16 +152,7 @@ fn main() {
         .trim()
         .to_string();
 
-    // Find the Swift resource directory for the target platform
-    // This helps swiftc locate the correct Swift standard library
-    let swift_lib_output = Command::new("xcrun")
-        .args(["--sdk", &sdk_name, "--find", "swiftc"])
-        .output()
-        .expect("Failed to find swiftc");
-    let swiftc_path = String::from_utf8(swift_lib_output.stdout)
-        .unwrap()
-        .trim()
-        .to_string();
+    let swiftc_path = swiftc_for_sdk(sdk_name).expect("Failed to find swiftc");
 
     let output_lib = PathBuf::from(&out_dir).join("libstorekit_bridge.a");
 
@@ -96,7 +164,7 @@ fn main() {
             "-module-name",
             "StoreKitBridge",
             "-target",
-            &swift_target,
+            swift_target,
             "-sdk",
             &sdk_path,
             "-framework",
@@ -114,9 +182,8 @@ fn main() {
         panic!("swiftc failed to compile storekit_bridge.swift");
     }
 
-    // Tell cargo to link the Swift static library
+    // Tell cargo where to find the Swift static library
     println!("cargo:rustc-link-search=native={}", out_dir);
-    println!("cargo:rustc-link-lib=static=storekit_bridge");
 
     // Link Swift standard libraries
     // Find the Swift library path for the target platform
