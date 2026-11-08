@@ -5,9 +5,9 @@
 //! as the callback "context", and returns the same pointer to the perry
 //! runtime. When the Swift side finishes its
 //! `Task { … }` it invokes [`storekit_callback`] from whatever thread the
-//! Swift concurrency runtime parked the continuation on. The perry-ffi
-//! resolution machinery is `Send`-safe and queues the actual fulfillment
-//! back onto perry's main thread.
+//! Swift concurrency runtime parked the continuation on. The callback copies
+//! the result and settles the promise with `resolve_with`, so the JS string
+//! is allocated on perry's main thread during the resolution pump.
 //!
 //! Swift returns a JSON string for every call; the TypeScript wrapper
 //! parses it. We do not attempt to construct typed JsValues on the Rust
@@ -15,7 +15,7 @@
 //! Swift bridge trivial and avoids leaking perry-runtime layout into
 //! Swift code.
 
-use perry_ffi::{read_string, JsPromise, JsString, Promise, StringHeader};
+use perry_ffi::{alloc_string, read_string, JsPromise, JsString, JsValue, Promise, StringHeader};
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 
@@ -56,14 +56,18 @@ extern "C" {
 /// runtime carry the result back to the awaiter.
 extern "C" fn storekit_callback(context: *mut c_void, result: *const c_char) {
     let promise = unsafe { JsPromise::from_raw(context as *mut Promise) };
-    let result_str = if result.is_null() {
-        "{\"error\":\"null result from StoreKit bridge\"}"
+    let result_str: String = if result.is_null() {
+        "{\"error\":\"null result from StoreKit bridge\"}".to_owned()
     } else {
         unsafe { std::ffi::CStr::from_ptr(result) }
             .to_str()
             .unwrap_or("{\"error\":\"non-UTF8 result from StoreKit bridge\"}")
+            .to_owned()
     };
-    promise.resolve_string(result_str);
+    // Swift calls back on a concurrency-runtime thread. Building the JS string
+    // there would allocate it in that thread's arena (undefined behaviour,
+    // perry#1824): copy the text here and allocate it on the main thread.
+    promise.resolve_with(move || JsValue::from_string_ptr(alloc_string(&result_str).as_raw()));
 }
 
 /// Read a perry JS string into an owned `CString` we can hand to Swift.
