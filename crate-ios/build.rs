@@ -8,7 +8,7 @@ fn main() {
     // Non-Apple target: lib.rs compiles the stub fallback instead of the
     // Swift bridge, so there is nothing to build or link here. This keeps
     // the crate buildable on hosts without Xcode/swiftc (e.g. Linux CI).
-    if target_os != "ios" && target_os != "macos" {
+    if target_os != "ios" && target_os != "macos" && target_os != "tvos" {
         return;
     }
 
@@ -46,6 +46,22 @@ fn main() {
             (
                 format!("x86_64-apple-ios{}-simulator", ios_version),
                 "iphonesimulator".to_string(),
+            )
+        }
+        // Apple TV device (arm64)
+        t if t.contains("aarch64-apple-tvos") && !t.contains("sim") => {
+            let tvos_version = "16.0";
+            (
+                format!("arm64-apple-tvos{}", tvos_version),
+                "appletvos".to_string(),
+            )
+        }
+        // Apple TV simulator (arm64)
+        t if t.contains("aarch64-apple-tvos-sim") => {
+            let tvos_version = "16.0";
+            (
+                format!("arm64-apple-tvos{}-simulator", tvos_version),
+                "appletvsimulator".to_string(),
             )
         }
         // macOS (arm64)
@@ -187,8 +203,8 @@ fn compile_bridge_from_source(
 
     // Link Swift standard libraries
     // Find the Swift library path for the target platform
-    let swift_lib_dir = if target_os == "ios" {
-        // For iOS, Swift libraries are in the SDK
+    let swift_lib_dir = if target_os == "ios" || target_os == "tvos" {
+        // For iOS and tvOS, Swift libraries are in the SDK
         format!("{}/usr/lib/swift", sdk_path)
     } else {
         // For macOS, Swift libraries are in the toolchain

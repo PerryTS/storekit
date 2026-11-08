@@ -10,7 +10,7 @@ repository = "https://github.com/PerryTS/storekit"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# Tracks the perry-ffi v0.5 ABI surface published from the
-# `PerryTS/perry` workspace. Pinned to a git rev rather than a
-# crates.io release until perry-ffi is published on crates.io.
-perry-ffi = { git = "https://github.com/PerryTS/perry", branch = "main" }
+# perry-ffi is pinned to the Perry release the package is tested with:
+# `main` moves ahead of released compilers (and needs nightly since
+# 0.6.0), and its ABI has to match the Perry that links the app.
+perry-ffi = { git = "https://github.com/PerryTS/perry", tag = "v0.5.1664" }

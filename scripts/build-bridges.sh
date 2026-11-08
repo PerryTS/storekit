@@ -2,7 +2,7 @@
 # Build the Swift StoreKit bridge for every Apple Rust target and stage the
 # archives under crate-ios/prebuilt/<rust-triple>/libstorekit_bridge.a.
 #
-# Must run on macOS with Xcode (swiftc + the iOS/macOS SDKs). The archives
+# Must run on macOS with Xcode (swiftc + the iOS/tvOS/macOS SDKs). The archives
 # are shipped in the npm package so non-Mac hosts (Linux CI, perry's Linux
 # builders) can produce iOS/macOS libraries without a Swift toolchain —
 # crate-ios/build.rs links these when swiftc is unavailable.
@@ -21,6 +21,8 @@ TARGETS=(
   "aarch64-apple-ios:arm64-apple-ios16.0:iphoneos"
   "aarch64-apple-ios-sim:arm64-apple-ios16.0-simulator:iphonesimulator"
   "x86_64-apple-ios:x86_64-apple-ios16.0-simulator:iphonesimulator"
+  "aarch64-apple-tvos:arm64-apple-tvos16.0:appletvos"
+  "aarch64-apple-tvos-sim:arm64-apple-tvos16.0-simulator:appletvsimulator"
   "aarch64-apple-darwin:arm64-apple-macosx13.0:macosx"
   "x86_64-apple-darwin:x86_64-apple-macosx13.0:macosx"
 )
